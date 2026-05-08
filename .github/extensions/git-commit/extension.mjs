@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const COPILOT_CLI_ATTRIBUTION = "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>";
+const MAX_COMMIT_MESSAGE_LENGTH = 70;
 
 let currentCwd = process.cwd();
 let pendingCommitContext;
@@ -117,10 +118,7 @@ async function suggestCommitMessage(session, statusText) {
         const response = await session.sendAndWait(
             {
                 prompt: [
-                    "Suggest a concise git commit message for the current changes.",
-                    "Do not modify files or run commands.",
-                    "Respond with only the commit message text, with no markdown, no quotes, and no explanation.",
-                    "Current `git status` output:",
+                    "Suggest a concise commit message for this git status. Respond with only the message.",
                     "```text",
                     statusText,
                     "```",
@@ -150,8 +148,9 @@ async function ensureRepository(session) {
 async function askForCommitMessage(session, suggestedMessage) {
     const message = await session.ui.input("Enter the commit message", {
         title: "Commit message",
-        description: "This will be passed to git commit with the Copilot CLI co-author attribution. Edit the suggested message if needed.",
+        description: `This will be passed to git commit with the Copilot CLI co-author attribution. Keep it at ${MAX_COMMIT_MESSAGE_LENGTH} characters or fewer.`,
         minLength: 1,
+        maxLength: MAX_COMMIT_MESSAGE_LENGTH,
         default: suggestedMessage,
     });
 
@@ -159,6 +158,13 @@ async function askForCommitMessage(session, suggestedMessage) {
 
     if (!trimmed) {
         await session.log("Commit cancelled: no commit message provided.");
+        return null;
+    }
+
+    if (trimmed.length > MAX_COMMIT_MESSAGE_LENGTH) {
+        await session.log(`Commit cancelled: commit message is ${trimmed.length} characters, which exceeds the ${MAX_COMMIT_MESSAGE_LENGTH}-character limit.`, {
+            level: "warning",
+        });
         return null;
     }
 
@@ -230,7 +236,14 @@ async function commitChanges(session) {
 
     await session.log(codeBlock(statusOutput.stdout));
 
-    const suggestedMessage = await suggestCommitMessage(session, statusOutput.stdout);
+    const shortStatus = await getStatus();
+
+    if (!shortStatus.ok) {
+        await session.log(`Unable to read short git status: ${commandOutput(shortStatus) || shortStatus.message}`, { level: "error" });
+        return;
+    }
+
+    const suggestedMessage = await suggestCommitMessage(session, shortStatus.stdout);
     const message = await askForCommitMessage(session, suggestedMessage);
 
     if (!message) {
