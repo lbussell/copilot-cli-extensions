@@ -60,6 +60,34 @@ async function getStatus() {
     return await runGit(["--no-advice", "status", "--porcelain=v1", "--untracked-files=all"]);
 }
 
+async function getCommitSha() {
+    const result = await runGit(["rev-parse", "--verify", "HEAD"]);
+    return result.ok ? result.stdout.trim() : undefined;
+}
+
+function makeCommitContext({ message, sha, output }) {
+    return [
+        "Context update from the /commit-demo extension:",
+        "A git commit was created.",
+        `Commit message: ${message}`,
+        sha ? `Commit SHA: ${sha}` : undefined,
+        output ? ["Git commit output:", "```text", output, "```"].join("\n") : undefined,
+        "",
+        "Do not modify files or run commands because of this context update.",
+        "No action is needed unless the user asks about this commit later.",
+    ]
+        .filter(Boolean)
+        .join("\n");
+}
+
+async function sendCommitContext(session, context) {
+    try {
+        await session.send({ prompt: context });
+    } catch (error) {
+        await session.log(`Unable to send commit context to the session: ${error instanceof Error ? error.message : String(error)}`, { level: "warning" });
+    }
+}
+
 function cleanSuggestedCommitMessage(message) {
     return message
         .trim()
@@ -215,7 +243,12 @@ async function commitChanges(session) {
         return;
     }
 
-    await session.log(`Committed changes:\n\n\`\`\`text\n${commandOutput(commit)}\n\`\`\``);
+    const output = commandOutput(commit);
+    const sha = await getCommitSha();
+    const context = makeCommitContext({ message, sha, output });
+
+    await sendCommitContext(session, context);
+    await session.log(`Committed changes:\n\n\`\`\`text\n${output}\n\`\`\``);
 }
 
 const session = await joinSession({
