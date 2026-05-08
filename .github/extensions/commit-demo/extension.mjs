@@ -5,11 +5,27 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 let currentCwd = process.cwd();
+let pendingCommitContext;
 
 function rememberCwd(input) {
     if (typeof input?.cwd === "string" && input.cwd.length > 0) {
         currentCwd = input.cwd;
     }
+}
+
+function rememberCwdAndInjectCommitContext(input) {
+    rememberCwd(input);
+
+    if (!pendingCommitContext) {
+        return;
+    }
+
+    const additionalContext = pendingCommitContext;
+    pendingCommitContext = undefined;
+
+    return {
+        additionalContext,
+    };
 }
 
 async function runGit(args) {
@@ -60,32 +76,21 @@ async function getStatus() {
     return await runGit(["--no-advice", "status", "--porcelain=v1", "--untracked-files=all"]);
 }
 
-async function getCommitSha() {
-    const result = await runGit(["rev-parse", "--verify", "HEAD"]);
+async function getShortCommitSha() {
+    const result = await runGit(["rev-parse", "--short", "HEAD"]);
     return result.ok ? result.stdout.trim() : undefined;
 }
 
-function makeCommitContext({ message, sha, output }) {
+function makeCommitContext({ message, shortSha }) {
     return [
-        "Context update from the /commit-demo extension:",
-        "A git commit was created.",
-        `Commit message: ${message}`,
-        sha ? `Commit SHA: ${sha}` : undefined,
-        output ? ["Git commit output:", "```text", output, "```"].join("\n") : undefined,
-        "",
-        "Do not modify files or run commands because of this context update.",
-        "No action is needed unless the user asks about this commit later.",
+        "<commit_details>",
+        "User committed:",
+        shortSha,
+        message,
+        "</commit_details>",
     ]
         .filter(Boolean)
         .join("\n");
-}
-
-async function sendCommitContext(session, context) {
-    try {
-        await session.send({ prompt: context });
-    } catch (error) {
-        await session.log(`Unable to send commit context to the session: ${error instanceof Error ? error.message : String(error)}`, { level: "warning" });
-    }
 }
 
 function cleanSuggestedCommitMessage(message) {
@@ -244,17 +249,16 @@ async function commitChanges(session) {
     }
 
     const output = commandOutput(commit);
-    const sha = await getCommitSha();
-    const context = makeCommitContext({ message, sha, output });
+    const shortSha = await getShortCommitSha();
 
-    await sendCommitContext(session, context);
+    pendingCommitContext = makeCommitContext({ message, shortSha });
     await session.log(`Committed changes:\n\n\`\`\`text\n${output}\n\`\`\``);
 }
 
 const session = await joinSession({
     hooks: {
         onSessionStart: rememberCwd,
-        onUserPromptSubmitted: rememberCwd,
+        onUserPromptSubmitted: rememberCwdAndInjectCommitContext,
         onPreToolUse: rememberCwd,
         onPostToolUse: rememberCwd,
         onErrorOccurred: rememberCwd,
