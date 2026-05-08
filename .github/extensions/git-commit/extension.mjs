@@ -265,7 +265,7 @@ const session = await joinSession({
     },
     commands: [
         {
-            name: "commit-demo",
+            name: "git-commit",
             description: "Ask for a commit message, optionally stage all changes, and commit.",
             handler: async () => {
                 await commitChanges(session);
