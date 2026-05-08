@@ -70,9 +70,9 @@ async function gitStatus(cwd: string) {
   const branchText = styled(branch, ansi.bold, ansi.cyan);
   const upstreamText = upstream ? styled(`→ ${remoteName(upstream)}`, ansi.dim) : '';
   const metrics = [
-    styledMetric(`↑${counts.ahead}`, counts.ahead, ansi.green),
-    styledMetric(`↓${counts.behind}`, counts.behind, ansi.red),
-    styledMetric(`U${counts.untracked}`, counts.untracked, ansi.yellow),
+    styledMetric(`↑${counts.ahead}`, counts.ahead, ansi.yellow),
+    styledMetric(`↓${counts.behind}`, counts.behind, ansi.yellow),
+    styledMetric(`U${counts.untracked}`, counts.untracked, ansi.green),
     styledMetric(`+${counts.additions}`, counts.additions, ansi.green),
     styledMetric(`-${counts.deletions}`, counts.deletions, ansi.red),
   ].filter(Boolean);
