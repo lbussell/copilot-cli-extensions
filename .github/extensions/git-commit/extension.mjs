@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const COPILOT_CLI_ATTRIBUTION = "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>";
 
 let currentCwd = process.cwd();
 let pendingCommitContext;
@@ -62,6 +63,14 @@ function parseStatus(status) {
 
 function commandOutput(result) {
     return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+}
+
+function withCopilotCliAttribution(message) {
+    if (message.includes(COPILOT_CLI_ATTRIBUTION)) {
+        return message;
+    }
+
+    return `${message.trim()}\n\n${COPILOT_CLI_ATTRIBUTION}`;
 }
 
 function codeBlock(text) {
@@ -141,7 +150,7 @@ async function ensureRepository(session) {
 async function askForCommitMessage(session, suggestedMessage) {
     const message = await session.ui.input("Enter the commit message", {
         title: "Commit message",
-        description: "This will be passed to git commit with -m. Edit the suggested message if needed.",
+        description: "This will be passed to git commit with the Copilot CLI co-author attribution. Edit the suggested message if needed.",
         minLength: 1,
         default: suggestedMessage,
     });
@@ -241,7 +250,7 @@ async function commitChanges(session) {
         return;
     }
 
-    const commit = await runGit(["commit", "-m", message]);
+    const commit = await runGit(["commit", "-m", withCopilotCliAttribution(message)]);
 
     if (!commit.ok) {
         await session.log(`Commit failed: ${commandOutput(commit) || commit.message}`, { level: "error" });
