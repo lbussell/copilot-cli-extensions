@@ -10,6 +10,7 @@ const ansi = {
   red: '\x1b[31m',
   yellow: '\x1b[33m',
   magenta: '\x1b[35m',
+  gray: '\x1b[90m',
 };
 
 const input = await Bun.stdin.text();
@@ -20,8 +21,12 @@ const width = await terminalWidth();
 const bar = progressBar(percent, 10);
 const left = await gitStatus(cwd);
 const right = `${percent}% ${bar}`;
+const github = await githubStatus(cwd);
 
-console.log(layoutStatusline(left, right, width, 1));
+console.log(layoutStatusline(left, right, width));
+if (github) {
+  console.log(github);
+}
 
 async function terminalWidth() {
   const envColumns = Number(process.env.COLUMNS);
@@ -37,31 +42,29 @@ async function ttyWidth() {
 }
 
 function visibleLength(value: string) {
-  return value.replace(/\x1b\[[0-9;]*m/g, '').length;
+  return value
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .length;
 }
 
-function layoutStatusline(left: string, right: string, width: number, padding: number) {
-  const outerPadding = Math.max(0, Math.floor(padding));
-  const leftPadding = ' '.repeat(outerPadding);
-  const rightPadding = ' '.repeat(outerPadding);
+function layoutStatusline(left: string, right: string, width: number) {
+  const targetWidth = Math.max(0, width - 1);
   const spaces = ' '.repeat(Math.max(
     1,
-    width - outerPadding * 2 - visibleLength(left) - visibleLength(right),
+    targetWidth - visibleLength(left) - visibleLength(right),
   ));
 
-  return `${leftPadding}${left}${spaces}${right}${rightPadding}`;
+  return `${left}${spaces}${right}`;
 }
 
 async function gitStatus(cwd: string) {
-  const [branch, upstream, counts, pullRequest] = await Promise.all([
+  const [branch, upstream, counts] = await Promise.all([
     gitBranch(cwd),
     gitUpstream(cwd),
     gitCounts(cwd),
-    pullRequestNumber(cwd),
   ]);
   const branchText = styled(branch, ansi.bold, ansi.cyan);
-  const upstreamText = upstream ? styled(`→ ${upstream}`, ansi.dim) : '';
-  const pullRequestText = pullRequest ? styled(`#${pullRequest}`, ansi.bold, ansi.magenta) : '';
+  const upstreamText = upstream ? styled(`→ ${remoteName(upstream)}`, ansi.dim) : '';
   const metrics = [
     styledMetric(`↑${counts.ahead}`, counts.ahead, ansi.green),
     styledMetric(`↓${counts.behind}`, counts.behind, ansi.red),
@@ -70,7 +73,7 @@ async function gitStatus(cwd: string) {
     styledMetric(`-${counts.deletions}`, counts.deletions, ansi.red),
   ].filter(Boolean);
 
-  return [branchText, upstreamText, pullRequestText, ...metrics].filter(Boolean).join(' ');
+  return [branchText, upstreamText, ...metrics].filter(Boolean).join(' ');
 }
 
 function styled(value: string, ...styles: string[]) {
@@ -79,6 +82,10 @@ function styled(value: string, ...styles: string[]) {
 
 function styledMetric(value: string, count: number, color: string) {
   return count ? styled(value, color) : '';
+}
+
+function remoteName(upstream: string) {
+  return upstream.split('/', 1)[0];
 }
 
 async function gitBranch(cwd: string) {
@@ -124,8 +131,41 @@ function diffStats(output: string) {
   );
 }
 
-async function pullRequestNumber(cwd: string) {
-  return shellText($`gh pr view --json number --jq .number`.cwd(cwd));
+async function currentPullRequest(cwd: string) {
+  const output = await shellText($`gh pr view --json number,title,state,isDraft`.cwd(cwd));
+  if (!output) {
+    return undefined;
+  }
+
+  return JSON.parse(output) as { number: number; title: string; state: string; isDraft: boolean };
+}
+
+async function githubStatus(cwd: string) {
+  const [repo, pullRequest] = await Promise.all([
+    shellText($`gh repo view --json nameWithOwner --jq .nameWithOwner`.cwd(cwd)),
+    currentPullRequest(cwd),
+  ]);
+
+  if (!repo || !pullRequest) {
+    return undefined;
+  }
+
+  return `${styled(`#${pullRequest.number}`, ansi.bold, pullRequestColor(pullRequest))} ${pullRequest.title}`;
+}
+
+function pullRequestColor(pullRequest: { state: string; isDraft: boolean }) {
+  if (pullRequest.isDraft) {
+    return ansi.gray;
+  }
+
+  switch (pullRequest.state) {
+    case 'MERGED':
+      return ansi.magenta;
+    case 'CLOSED':
+      return ansi.red;
+    default:
+      return ansi.green;
+  }
 }
 
 async function shellText(command: ReturnType<typeof $>) {
