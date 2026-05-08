@@ -15,7 +15,11 @@ const ansi = {
 
 const input = await Bun.stdin.text();
 const data = JSON.parse(input);
-const percent = Math.floor(data.context_window?.used_percentage || 0);
+const percent = Math.floor(
+  data.context_window?.current_context_used_percentage
+  ?? data.context_window?.used_percentage
+  ?? 0,
+);
 const cwd = data.cwd ?? data.workspace?.current_dir ?? process.cwd();
 const width = await terminalWidth();
 const bar = progressBar(percent, 10);
