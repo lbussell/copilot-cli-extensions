@@ -60,16 +60,38 @@ async function getStatus() {
     return await runGit(["--no-advice", "status", "--porcelain=v1", "--untracked-files=all"]);
 }
 
-async function showGitStatus(session) {
-    const status = await runGit(["--no-advice", "status"]);
+function cleanSuggestedCommitMessage(message) {
+    return message
+        .trim()
+        .replace(/^```(?:text)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .split("\n")
+        .map((line) => line.trim())
+        .find(Boolean);
+}
 
-    if (!status.ok) {
-        await session.log((status.stderr || status.message).trim(), { level: "error" });
-        return false;
+async function suggestCommitMessage(session, statusText) {
+    try {
+        const response = await session.sendAndWait(
+            {
+                prompt: [
+                    "Suggest a concise git commit message for the current changes.",
+                    "Do not modify files or run commands.",
+                    "Respond with only the commit message text, with no markdown, no quotes, and no explanation.",
+                    "Current `git status` output:",
+                    "```text",
+                    statusText,
+                    "```",
+                ].join("\n"),
+            },
+            120_000,
+        );
+
+        return cleanSuggestedCommitMessage(response?.data.content ?? "");
+    } catch (error) {
+        await session.log(`Unable to get a suggested commit message: ${error instanceof Error ? error.message : String(error)}`, { level: "warning" });
+        return undefined;
     }
-
-    await session.log(codeBlock(status.stdout));
-    return true;
 }
 
 async function ensureRepository(session) {
@@ -83,11 +105,12 @@ async function ensureRepository(session) {
     return true;
 }
 
-async function askForCommitMessage(session) {
+async function askForCommitMessage(session, suggestedMessage) {
     const message = await session.ui.input("Enter the commit message", {
         title: "Commit message",
-        description: "This will be passed to git commit with -m.",
+        description: "This will be passed to git commit with -m. Edit the suggested message if needed.",
         minLength: 1,
+        default: suggestedMessage,
     });
 
     const trimmed = message?.trim();
@@ -156,11 +179,17 @@ async function commitChanges(session) {
         return;
     }
 
-    if (!(await showGitStatus(session))) {
+    const statusOutput = await runGit(["--no-advice", "status"]);
+
+    if (!statusOutput.ok) {
+        await session.log((statusOutput.stderr || statusOutput.message).trim(), { level: "error" });
         return;
     }
 
-    const message = await askForCommitMessage(session);
+    await session.log(codeBlock(statusOutput.stdout));
+
+    const suggestedMessage = await suggestCommitMessage(session, statusOutput.stdout);
+    const message = await askForCommitMessage(session, suggestedMessage);
 
     if (!message) {
         return;
