@@ -5,7 +5,7 @@ const input = await Bun.stdin.text();
 const data = JSON.parse(input);
 const model = data.model.display_name;
 const percent = Math.floor(data.context_window?.used_percentage || 0);
-const width = terminalWidth();
+const width = await terminalWidth();
 const bar = progressBar(percent, 10);
 const left = `[${model}]`;
 const right = `${percent}% ${bar} `;
@@ -13,25 +13,16 @@ const right = `${percent}% ${bar} `;
 console.log(layoutStatusline(left, right, width));
 console.log(`terminal width: ${width}`);
 
-function terminalWidth() {
+async function terminalWidth() {
   const envColumns = Number(process.env.COLUMNS);
-  const columns = ttyWidth() ?? process.stderr.columns ?? process.stdout.columns ?? envColumns;
+  const columns = await ttyWidth() ?? process.stderr.columns ?? process.stdout.columns ?? envColumns;
 
   return Number.isFinite(columns) && columns > 0 ? Math.floor(columns) : 80;
 }
 
-function ttyWidth() {
-  const result = Bun.spawnSync({
-    cmd: ['/bin/sh', '-c', 'stty size < /dev/tty 2>/dev/null'],
-    stdout: 'pipe',
-    stderr: 'ignore',
-  });
-
-  if (!result.success) {
-    return undefined;
-  }
-
-  const [, columns] = new TextDecoder().decode(result.stdout).trim().split(/\s+/).map(Number);
+async function ttyWidth() {
+  const output = await $`/bin/sh -c ${'stty size < /dev/tty'}`.quiet().nothrow().text();
+  const [, columns] = output.trim().split(/\s+/).map(Number);
   return columns;
 }
 
@@ -42,7 +33,8 @@ function visibleLength(value: string) {
 function layoutStatusline(left: string, right: string, width: number) {
   const spaces = ' '.repeat(Math.max(
     1,
-    width - visibleLength(left) - visibleLength(right),
+    // Assume that we have set padding: 1 in ~/.copilot/settings.json
+    width - visibleLength(left) - visibleLength(right) - 1,
   ));
 
   return `${left}${spaces}${right}`;
