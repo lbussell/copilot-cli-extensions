@@ -21,44 +21,13 @@ const percent = Math.floor(
   ?? 0,
 );
 const cwd = data.cwd ?? data.workspace?.current_dir ?? process.cwd();
-const width = await terminalWidth();
-const bar = progressBar(percent, 10);
+const contextUsage = progressBar(percent, 17);
 const left = await gitStatus(cwd);
-const right = `${percent}% ${bar}`;
 const github = await githubStatus(cwd);
 
-console.log(layoutStatusline(left, right, width));
+console.log([contextUsage, left].filter(Boolean).join(' '));
 if (github) {
   console.log(github);
-}
-
-async function terminalWidth() {
-  const envColumns = Number(process.env.COLUMNS);
-  const columns = await ttyWidth() ?? process.stderr.columns ?? process.stdout.columns ?? envColumns;
-
-  return Number.isFinite(columns) && columns > 0 ? Math.floor(columns) : 80;
-}
-
-async function ttyWidth() {
-  const output = await $`/bin/sh -c ${'stty size < /dev/tty'}`.quiet().nothrow().text();
-  const [, columns] = output.trim().split(/\s+/).map(Number);
-  return columns;
-}
-
-function visibleLength(value: string) {
-  return value
-    .replace(/\x1b\[[0-9;]*m/g, '')
-    .length;
-}
-
-function layoutStatusline(left: string, right: string, width: number) {
-  const targetWidth = Math.max(0, width - 1);
-  const spaces = ' '.repeat(Math.max(
-    1,
-    targetWidth - visibleLength(left) - visibleLength(right),
-  ));
-
-  return `${left}${spaces}${right}`;
 }
 
 async function gitStatus(cwd: string) {
@@ -182,12 +151,13 @@ async function shellOutput(command: ReturnType<typeof $>) {
 
 function progressBar(percent: number, width: number) {
   const partialBlocks = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
-  const emptyBackground = '\x1b[48;5;238m';
-  const visibleWidth = Math.max(0, Math.floor(width));
+  const percentText = `${percent}%`;
+  const visibleWidth = Math.max(percentText.length, Math.floor(width));
   const clampedPercent = Math.max(0, Math.min(100, percent));
   const totalEighths = Math.round(clampedPercent * visibleWidth * 8 / 100);
   const filled = Math.floor(totalEighths / 8);
   const partialBlock = partialBlocks[totalEighths % 8];
+  const color = progressBarColor(clampedPercent);
   const cells = Array.from({ length: visibleWidth }, (_, index) => {
     if (index < filled) {
       return '█';
@@ -199,6 +169,20 @@ function progressBar(percent: number, width: number) {
 
     return ' ';
   });
+  const percentStart = Math.floor((visibleWidth - percentText.length) / 2);
+  cells.splice(percentStart, percentText.length, ...percentText);
 
-  return cells.length ? `${emptyBackground}${cells.join('')}${ansi.reset}` : '';
+  return cells.length ? `[${styled(cells.join(''), color)}]` : '[]';
+}
+
+function progressBarColor(percent: number) {
+  if (percent > 70) {
+    return ansi.red;
+  }
+
+  if (percent > 50) {
+    return ansi.yellow;
+  }
+
+  return ansi.dim;
 }
