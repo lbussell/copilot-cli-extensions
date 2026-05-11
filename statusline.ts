@@ -21,13 +21,13 @@ const percent = Math.floor(
   ?? 0,
 );
 const cwd = data.cwd ?? data.workspace?.current_dir ?? process.cwd();
-const contextUsage = progressBar(percent, 17);
+const contextUsage = contextStatus(percent);
 const left = await gitStatus(cwd);
 const github = await githubStatus(cwd);
 
-console.log([contextUsage, left].filter(Boolean).join(' '));
+console.log(statusLine([contextUsage, left]));
 if (github) {
-  console.log(github);
+  console.log(statusLine([github]));
 }
 
 async function gitStatus(cwd: string) {
@@ -36,8 +36,9 @@ async function gitStatus(cwd: string) {
     gitUpstream(cwd),
     gitCounts(cwd),
   ]);
+  const label = styled('git', ansi.dim);
   const branchText = styled(branch, ansi.bold, ansi.cyan);
-  const upstreamText = upstream ? styled(`→ ${remoteName(upstream)}`, ansi.dim) : '';
+  const upstreamText = upstream ? `${styled('→', ansi.dim)} ${styled(remoteName(upstream), ansi.dim)}` : '';
   const metrics = [
     styledMetric(`↑${counts.ahead}`, counts.ahead, ansi.yellow),
     styledMetric(`↓${counts.behind}`, counts.behind, ansi.yellow),
@@ -45,8 +46,13 @@ async function gitStatus(cwd: string) {
     styledMetric(`+${counts.additions}`, counts.additions, ansi.green),
     styledMetric(`-${counts.deletions}`, counts.deletions, ansi.red),
   ].filter(Boolean);
+  const changesText = metrics.length ? `${styled('Δ', ansi.dim)} ${metrics.join(' ')}` : '';
 
-  return [branchText, upstreamText, ...metrics].filter(Boolean).join(' ');
+  return [label, branchText, upstreamText, changesText].filter(Boolean).join(' ');
+}
+
+function statusLine(segments: string[]) {
+  return segments.filter(Boolean).join(styled(' │ ', ansi.dim));
 }
 
 function styled(value: string, ...styles: string[]) {
@@ -123,7 +129,14 @@ async function githubStatus(cwd: string) {
     return undefined;
   }
 
-  return `${styled(`#${pullRequest.number}`, ansi.bold, pullRequestColor(pullRequest))} ${pullRequest.title}`;
+  const state = pullRequestState(pullRequest);
+
+  return [
+    styled(repo, ansi.dim),
+    styled(`#${pullRequest.number}`, ansi.bold, pullRequestColor(pullRequest)),
+    state,
+    pullRequest.title,
+  ].filter(Boolean).join(' ');
 }
 
 function pullRequestColor(pullRequest: { state: string; isDraft: boolean }) {
@@ -141,6 +154,21 @@ function pullRequestColor(pullRequest: { state: string; isDraft: boolean }) {
   }
 }
 
+function pullRequestState(pullRequest: { state: string; isDraft: boolean }) {
+  if (pullRequest.isDraft) {
+    return styled('draft', ansi.yellow);
+  }
+
+  switch (pullRequest.state) {
+    case 'MERGED':
+      return styled('merged', ansi.magenta);
+    case 'CLOSED':
+      return styled('closed', ansi.red);
+    default:
+      return '';
+  }
+}
+
 async function shellText(command: ReturnType<typeof $>) {
   return (await shellOutput(command)).trim();
 }
@@ -149,15 +177,20 @@ async function shellOutput(command: ReturnType<typeof $>) {
   return command.quiet().nothrow().text();
 }
 
+function contextStatus(percent: number) {
+  const clampedPercent = clampPercent(percent);
+
+  return `${progressBar(clampedPercent, 19)}`;
+}
+
 function progressBar(percent: number, width: number) {
   const partialBlocks = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
   const percentText = `${percent}%`;
   const visibleWidth = Math.max(percentText.length, Math.floor(width));
-  const clampedPercent = Math.max(0, Math.min(100, percent));
-  const totalEighths = Math.round(clampedPercent * visibleWidth * 8 / 100);
+  const totalEighths = Math.round(percent * visibleWidth * 8 / 100);
   const filled = Math.floor(totalEighths / 8);
   const partialBlock = partialBlocks[totalEighths % 8];
-  const color = progressBarColor(clampedPercent);
+  const color = progressBarColor(percent);
   const cells = Array.from({ length: visibleWidth }, (_, index) => {
     if (index < filled) {
       return '█';
@@ -167,12 +200,19 @@ function progressBar(percent: number, width: number) {
       return partialBlock;
     }
 
-    return ' ';
+    return '·';
   });
   const percentStart = Math.floor((visibleWidth - percentText.length) / 2);
-  cells.splice(percentStart, percentText.length, ...percentText);
+  const beforeText = cells.slice(0, percentStart).join('');
+  const afterText = cells.slice(percentStart + percentText.length).join('');
 
-  return cells.length ? `[${styled(cells.join(''), color)}]` : '[]';
+  return cells.length
+    ? `[${styled(beforeText, color)}${styled(percentText, ansi.bold)}${styled(afterText, color)}]`
+    : '[]';
+}
+
+function clampPercent(percent: number) {
+  return Math.max(0, Math.min(100, percent));
 }
 
 function progressBarColor(percent: number) {
