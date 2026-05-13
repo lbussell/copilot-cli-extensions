@@ -11,6 +11,10 @@ const ansi = {
   yellow: '\x1b[33m',
   magenta: '\x1b[35m',
   gray: '\x1b[90m',
+  blue: '\x1b[34m',
+  fullWhite256: '\x1b[38;5;231m',
+  bgBlue: '\x1b[44m',
+  bgWhite: '\x1b[47m',
 };
 
 const input = await Bun.stdin.text();
@@ -20,12 +24,14 @@ const percent = Math.floor(
   ?? data.context_window?.used_percentage
   ?? 0,
 );
+const contextLimit = data.context_window?.displayed_context_limit
+  ?? data.context_window?.context_window_size;
 const cwd = data.cwd ?? data.workspace?.current_dir ?? process.cwd();
-const contextUsage = contextStatus(percent);
+const contextUsage = contextStatus(percent, contextLimit);
 const left = await gitStatus(cwd);
 const github = await githubStatus(cwd);
 
-console.log(statusLine([contextUsage, left]));
+console.log(statusLine([contextUsage, left], ' '));
 if (github) {
   console.log(statusLine([github]));
 }
@@ -51,8 +57,8 @@ async function gitStatus(cwd: string) {
   return [label, branchText, upstreamText, changesText].filter(Boolean).join(' ');
 }
 
-function statusLine(segments: string[]) {
-  return segments.filter(Boolean).join(styled(' │ ', ansi.dim));
+function statusLine(segments: string[], separator = styled(' │ ', ansi.dim)) {
+  return segments.filter(Boolean).join(separator);
 }
 
 function styled(value: string, ...styles: string[]) {
@@ -177,52 +183,50 @@ async function shellOutput(command: ReturnType<typeof $>) {
   return command.quiet().nothrow().text();
 }
 
-function contextStatus(percent: number) {
+function contextStatus(percent: number, contextLimit: unknown) {
   const clampedPercent = clampPercent(percent);
 
-  return `${progressBar(clampedPercent, 19)}`;
+  return progressBar(clampedPercent, 20, formatTokenCount(contextLimit) + " ");
 }
 
-function progressBar(percent: number, width: number) {
-  const partialBlocks = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+function progressBar(percent: number, width: number, contextText = '') {
   const percentText = `${percent}%`;
-  const visibleWidth = Math.max(percentText.length, Math.floor(width));
-  const totalEighths = Math.round(percent * visibleWidth * 8 / 100);
-  const filled = Math.floor(totalEighths / 8);
-  const partialBlock = partialBlocks[totalEighths % 8];
-  const color = progressBarColor(percent);
-  const cells = Array.from({ length: visibleWidth }, (_, index) => {
-    if (index < filled) {
-      return '█';
-    }
+  const visibleWidth = Math.max(percentText.length + contextText.length + 1, Math.floor(width));
+  const filledWidth = Math.max(percentText.length, Math.round(percent * visibleWidth / 100));
+  const filledSpacer = ' '.repeat(filledWidth - percentText.length);
+  const remainingWidth = visibleWidth - filledWidth;
+  const remainingSpacer = `${ansi.bgWhite}${' '.repeat(remainingWidth)}${ansi.reset}`;
+  const contextSuffix = contextText && contextText.length <= remainingWidth
+    ? `${ansi.bgWhite}${' '.repeat(remainingWidth - contextText.length)}${ansi.gray}${contextText}${ansi.reset}`
+    : remainingSpacer;
+  const separator = '';
+  const cap = '▎';
 
-    if (index === filled && partialBlock) {
-      return partialBlock;
-    }
-
-    return '·';
-  });
-  const percentStart = Math.floor((visibleWidth - percentText.length) / 2);
-  const beforeText = cells.slice(0, percentStart).join('');
-  const afterText = cells.slice(percentStart + percentText.length).join('');
-
-  return cells.length
-    ? `[${styled(beforeText, color)}${styled(percentText, ansi.bold)}${styled(afterText, color)}]`
-    : '[]';
+  return [
+    `${ansi.bgBlue}${ansi.gray}${cap}${ansi.reset}`,
+    `${ansi.bgBlue}${filledSpacer}${ansi.fullWhite256}${percentText}${ansi.reset}`,
+    styled(separator, ansi.blue, ansi.bgWhite),
+    contextSuffix,
+    styled(cap, ansi.gray),
+  ].join('');
 }
 
 function clampPercent(percent: number) {
   return Math.max(0, Math.min(100, percent));
 }
 
-function progressBarColor(percent: number) {
-  if (percent > 70) {
-    return ansi.red;
+function formatTokenCount(tokens: unknown) {
+  const count = Number(tokens);
+  if (!Number.isFinite(count) || count <= 0) {
+    return '';
   }
 
-  if (percent > 50) {
-    return ansi.yellow;
+  if (count >= 1_000_000) {
+    const millions = count / 1_000_000;
+    const precision = millions < 10 && !Number.isInteger(millions) ? 1 : 0;
+
+    return `${millions.toFixed(precision).replace(/\.0$/, '')}M`;
   }
 
-  return ansi.dim;
+  return `${Math.round(count / 1_000)}K`;
 }
