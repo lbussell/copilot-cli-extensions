@@ -19,6 +19,6 @@ Small collection of GitHub Copilot CLI extensions and helpers.
 
 ## Usage
 
-Copilot CLI loads project extensions from `.github/extensions/`. See the [Copilot CLI extensions documentation](https://unpkg.com/@github/copilot-sdk@latest/docs/extensions.md) for discovery and authoring details.
+Copilot CLI loads project extensions from `.github/extensions/`. See the [Copilot CLI extensions documentation](https://github.com/github/copilot-sdk/blob/main/nodejs/docs/extensions.md) for discovery and authoring details.
 
 `statusline.ts` is intended to be configured as a Copilot CLI status line script, not run standalone. See the [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#slash-commands-in-the-interactive-interface) for `/statusline`.
